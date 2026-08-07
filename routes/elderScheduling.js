@@ -1,23 +1,26 @@
 // routes/elderScheduling.js
-// Member-facing wizard endpoints for the Android app's standalone backend.
-// Bearer-token gated (see lib/schedulerAuth.js) — no cookies, no shared
-// auth with coastal-elder-scheduler. Only Airtable is shared between the
-// two systems, at the data level.
+// Member-facing wizard endpoints, plus admin endpoints for managing WAC
+// class codes. Bearer-token gated (see lib/schedulerAuth.js) — no cookies,
+// no shared auth with coastal-elder-scheduler. Only Airtable is shared
+// between the two systems, at the data level.
 //
-// NOTE: getAvailableElders/getAvailableDates/etc. in lib/availability.js
-// are stubs pending the real matching logic — see that file's header.
+// Admin routes below (/wac-codes/*) are wired up and ready, but nothing can
+// actually reach them yet — requireAdminAuth only accepts tokens with
+// scope: 'admin', and nothing issues those until Entra SSO login is built
+// (separate piece of work; see lib/schedulerAuth.js header comment).
 
 const express = require('express');
 const { listRecords } = require('../lib/airtable');
 const availability = require('../lib/availability');
 const schedulerAuth = require('../lib/schedulerAuth');
+const wacCodes = require('../lib/wacCodes');
 const config = require('../config');
 
 const router = express.Router();
 
-// --- Auth ---
+// --- Booking-path login (WAC code, replaces the old single shared PIN) ---
 
-router.post('/scheduler-auth', (req, res) => schedulerAuth.checkPin(req, res));
+router.post('/scheduler-auth', (req, res) => schedulerAuth.checkCode(req, res));
 
 // --- Campuses ---
 
@@ -92,9 +95,7 @@ router.post('/appointments', schedulerAuth.requireSchedulerAuth, async (req, res
 
     await availability.createAppointment({ campusName, elderName, date, timeSlot, memberName, memberEmail });
 
-    // No email step here yet (deferred per earlier decision) — booking
-    // success alone is returned. Add Graph mail once the new backend has
-    // its own Entra app registration.
+    // No email step here yet (deferred per earlier decision).
     res.status(201).json({ success: true, emailSent: false });
   } catch (err) {
     if (err.message === 'SLOT_NO_LONGER_AVAILABLE') {
@@ -116,6 +117,39 @@ router.post('/sunday-optout', schedulerAuth.requireSchedulerAuth, async (req, re
     await availability.createSundayOptOut({ campusName, memberName, memberEmail, notes });
 
     res.status(201).json({ success: true, emailSent: false });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- Admin: WAC code management (blocked on Entra SSO — see file header) ---
+
+router.get('/wac-codes', schedulerAuth.requireAdminAuth, async (req, res, next) => {
+  try {
+    const codes = await wacCodes.listCodes();
+    res.json(codes);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/wac-codes', schedulerAuth.requireAdminAuth, async (req, res, next) => {
+  try {
+    const { code, campusName, classDate } = req.body;
+    if (!code || !campusName || !classDate) {
+      return res.status(400).json({ error: 'code, campusName, and classDate are required' });
+    }
+    const record = await wacCodes.createCode({ code, campusName, classDate });
+    res.status(201).json(record);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/wac-codes/:id', schedulerAuth.requireAdminAuth, async (req, res, next) => {
+  try {
+    await wacCodes.deactivateCode(req.params.id);
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }
