@@ -33,4 +33,13 @@ module.exports = {
     // before stopping. Matches coastal-elder-scheduler's config shape.
     weeksAhead: Number(process.env.SCHEDULING_WEEKS_AHEAD) || 5,
   },
+
+  entra: {
+    tenantId: process.env.ENTRA_TENANT_ID,
+    clientId: process.env.ENTRA_CLIENT_ID,
+    // Both groups grant the same admin-app access — no tiered permission
+    // level between the two right now.
+    elderGroupId: process.env.ENTRA_GROUP_ID_ELDERS,
+    adminGroupId: process.env.ENTRA_GROUP_ID_ADMINS,
+  },
 };

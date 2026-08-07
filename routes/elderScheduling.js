@@ -4,10 +4,9 @@
 // no shared auth with coastal-elder-scheduler. Only Airtable is shared
 // between the two systems, at the data level.
 //
-// Admin routes below (/wac-codes/*) are wired up and ready, but nothing can
-// actually reach them yet — requireAdminAuth only accepts tokens with
-// scope: 'admin', and nothing issues those until Entra SSO login is built
-// (separate piece of work; see lib/schedulerAuth.js header comment).
+// Admin routes below (/wac-codes/*) require an admin-scoped token, obtained
+// via POST /admin-auth (Entra sign-in — see lib/schedulerAuth.js and
+// lib/entraAuth.js).
 
 const express = require('express');
 const { listRecords } = require('../lib/airtable');
@@ -21,6 +20,8 @@ const router = express.Router();
 // --- Booking-path login (WAC code, replaces the old single shared PIN) ---
 
 router.post('/scheduler-auth', (req, res) => schedulerAuth.checkCode(req, res));
+
+router.post('/admin-auth', (req, res) => schedulerAuth.checkEntraLogin(req, res));
 
 // --- Campuses ---
 
