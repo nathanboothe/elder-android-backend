@@ -177,6 +177,9 @@ router.post('/sunday-optout', schedulerAuth.requireSchedulerAuth, async (req, re
 
 router.get('/wac-codes', schedulerAuth.requireAdminAuth, async (req, res, next) => {
   try {
+    if (req.auth.role !== 'admin') {
+      return res.status(403).json({ error: 'Only admins can manage WAC codes.' });
+    }
     const codes = await wacCodes.listCodes();
     res.json(codes);
   } catch (err) {
@@ -186,6 +189,9 @@ router.get('/wac-codes', schedulerAuth.requireAdminAuth, async (req, res, next) 
 
 router.post('/wac-codes', schedulerAuth.requireAdminAuth, async (req, res, next) => {
   try {
+    if (req.auth.role !== 'admin') {
+      return res.status(403).json({ error: 'Only admins can manage WAC codes.' });
+    }
     const { code, campusName, classDate } = req.body;
     if (!code || !campusName || !classDate) {
       return res.status(400).json({ error: 'code, campusName, and classDate are required' });
@@ -199,6 +205,9 @@ router.post('/wac-codes', schedulerAuth.requireAdminAuth, async (req, res, next)
 
 router.delete('/wac-codes/:id', schedulerAuth.requireAdminAuth, async (req, res, next) => {
   try {
+    if (req.auth.role !== 'admin') {
+      return res.status(403).json({ error: 'Only admins can manage WAC codes.' });
+    }
     await wacCodes.deactivateCode(req.params.id);
     res.json({ success: true });
   } catch (err) {
