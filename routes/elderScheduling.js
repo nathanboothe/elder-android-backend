@@ -9,7 +9,7 @@
 // lib/entraAuth.js).
 
 const express = require('express');
-const { listRecords } = require('../lib/airtable');
+const { listRecords, createRecord, deleteRecords, getRecord } = require('../lib/airtable');
 const availability = require('../lib/availability');
 const mail = require('../lib/graphMail');
 const schedulerAuth = require('../lib/schedulerAuth');
@@ -201,6 +201,158 @@ router.delete('/wac-codes/:id', schedulerAuth.requireAdminAuth, async (req, res,
   try {
     await wacCodes.deactivateCode(req.params.id);
     res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- Elder availability. Hybrid scoping: role 'elder' is forced to their
+// own record (from the token, matched at login by email); role 'admin'
+// can operate on any elder by name. ---
+
+router.get('/elder-availability', schedulerAuth.requireAdminAuth, async (req, res, next) => {
+  try {
+    let elderName = req.query.elderName;
+    if (req.auth.role === 'elder') {
+      if (!req.auth.elderName) {
+        return res.status(404).json({ error: 'No elder record matches your signed-in account.' });
+      }
+      elderName = req.auth.elderName;
+    } else if (!elderName) {
+      return res.status(400).json({ error: 'elderName is required' });
+    }
+
+    const rows = await listRecords(config.airtable.tables.availability, {
+      filterByFormula: `{Elder Name} = '${elderName.replace(/'/g, "\\'")}'`,
+    });
+    res.json(rows.map((r) => ({ id: r.id, ...r.fields })));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/elder-availability', schedulerAuth.requireAdminAuth, async (req, res, next) => {
+  try {
+    let { elderName, dayOfWeek, weekOfMonth, timeSlots } = req.body;
+
+    if (req.auth.role === 'elder') {
+      if (!req.auth.elderName) {
+        return res.status(404).json({ error: 'No elder record matches your signed-in account.' });
+      }
+      elderName = req.auth.elderName;
+    }
+
+    if (!elderName || !dayOfWeek || !Array.isArray(weekOfMonth) || !Array.isArray(timeSlots)) {
+      return res.status(400).json({ error: 'Missing or invalid fields' });
+    }
+
+    const record = await createRecord(config.airtable.tables.availability, {
+      'Elder Name': elderName,
+      'Day of Week': dayOfWeek,
+      'Week of Month': weekOfMonth,
+      'Time Slots': timeSlots,
+    });
+    res.status(201).json(record);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/elder-availability/:id', schedulerAuth.requireAdminAuth, async (req, res, next) => {
+  try {
+    if (req.auth.role === 'elder') {
+      const record = await getRecord(config.airtable.tables.availability, req.params.id);
+      if (record.fields['Elder Name'] !== req.auth.elderName) {
+        return res.status(403).json({ error: 'You can only manage your own availability.' });
+      }
+    }
+    await deleteRecords(config.airtable.tables.availability, [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- Elder time off. Same hybrid scoping as availability. ---
+
+router.get('/elder-timeoff', schedulerAuth.requireAdminAuth, async (req, res, next) => {
+  try {
+    let elderName = req.query.elderName;
+    if (req.auth.role === 'elder') {
+      if (!req.auth.elderName) {
+        return res.status(404).json({ error: 'No elder record matches your signed-in account.' });
+      }
+      elderName = req.auth.elderName;
+    } else if (!elderName) {
+      return res.status(400).json({ error: 'elderName is required' });
+    }
+
+    const rows = await listRecords(config.airtable.tables.timeOff, {
+      filterByFormula: `{Elder Name} = '${elderName.replace(/'/g, "\\'")}'`,
+    });
+    res.json(rows.map((r) => ({ id: r.id, ...r.fields })));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/elder-timeoff', schedulerAuth.requireAdminAuth, async (req, res, next) => {
+  try {
+    let { elderName, startDate, endDate, notes } = req.body;
+
+    if (req.auth.role === 'elder') {
+      if (!req.auth.elderName) {
+        return res.status(404).json({ error: 'No elder record matches your signed-in account.' });
+      }
+      elderName = req.auth.elderName;
+    }
+
+    if (!elderName || !startDate || !endDate) {
+      return res.status(400).json({ error: 'elderName, startDate, and endDate are required' });
+    }
+
+    const record = await createRecord(config.airtable.tables.timeOff, {
+      'Elder Name': elderName,
+      'Start Date': startDate,
+      'End Date': endDate,
+      Notes: notes || '',
+    });
+    res.status(201).json(record);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/elder-timeoff/:id', schedulerAuth.requireAdminAuth, async (req, res, next) => {
+  try {
+    if (req.auth.role === 'elder') {
+      const record = await getRecord(config.airtable.tables.timeOff, req.params.id);
+      if (record.fields['Elder Name'] !== req.auth.elderName) {
+        return res.status(403).json({ error: 'You can only manage your own time off.' });
+      }
+    }
+    await deleteRecords(config.airtable.tables.timeOff, [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- Admin-only elder picker, for the "manage someone else's availability" flow ---
+
+router.get('/all-elders', schedulerAuth.requireAdminAuth, async (req, res, next) => {
+  try {
+    if (req.auth.role !== 'admin') {
+      return res.status(403).json({ error: 'Only admins can browse all elders.' });
+    }
+    const records = await listRecords(config.airtable.tables.elders);
+    res.json(
+      records.map((r) => ({
+        id: r.id,
+        name: r.fields['Full Name'],
+        campus: r.fields['Campus'],
+      }))
+    );
   } catch (err) {
     next(err);
   }
