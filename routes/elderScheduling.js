@@ -11,6 +11,7 @@
 const express = require('express');
 const { listRecords } = require('../lib/airtable');
 const availability = require('../lib/availability');
+const mail = require('../lib/graphMail');
 const schedulerAuth = require('../lib/schedulerAuth');
 const wacCodes = require('../lib/wacCodes');
 const config = require('../config');
@@ -96,8 +97,45 @@ router.post('/appointments', schedulerAuth.requireSchedulerAuth, async (req, res
 
     await availability.createAppointment({ campusName, elderName, date, timeSlot, memberName, memberEmail });
 
-    // No email step here yet (deferred per earlier decision).
-    res.status(201).json({ success: true, emailSent: false });
+    // Look up the elder's email for the confirmation.
+    const elderRecords = await listRecords(config.airtable.tables.elders, {
+      filterByFormula: `{Full Name} = '${elderName.replace(/'/g, "\\'")}'`,
+    });
+    const elderEmail = elderRecords[0]?.fields?.['Email'];
+
+    const summary = `Campus: ${campusName}\nElder: ${elderName}\nDate: ${date}\nTime: ${timeSlot}\nMember: ${memberName} (${memberEmail})`;
+
+    // The booking itself already succeeded above — that's the part that
+    // matters. Email is a secondary effect: if it fails, log it
+    // server-side and tell the client via `emailSent: false`, but don't
+    // fail the whole request.
+    let emailSent = true;
+    try {
+      await Promise.all([
+        mail.sendMail({
+          to: memberEmail,
+          subject: 'Your meeting with an Elder is confirmed',
+          body: `Your meeting is confirmed.\n\n${summary}`,
+        }),
+        elderEmail
+          ? mail.sendMail({
+              to: elderEmail,
+              subject: 'New meeting scheduled',
+              body: `A member has scheduled a meeting with you.\n\n${summary}`,
+            })
+          : Promise.resolve(),
+        mail.sendMail({
+          to: config.notifications.omeEmail,
+          subject: 'New Elder meeting scheduled (FYI) — Android app',
+          body: `FYI — a new meeting was scheduled via the Android app.\n\n${summary}`,
+        }),
+      ]);
+    } catch (emailErr) {
+      console.error('Booking saved, but email failed:', emailErr);
+      emailSent = false;
+    }
+
+    res.status(201).json({ success: true, emailSent });
   } catch (err) {
     if (err.message === 'SLOT_NO_LONGER_AVAILABLE') {
       return res.status(409).json({ error: 'That time was just booked by someone else. Please pick another.' });
@@ -117,7 +155,19 @@ router.post('/sunday-optout', schedulerAuth.requireSchedulerAuth, async (req, re
 
     await availability.createSundayOptOut({ campusName, memberName, memberEmail, notes });
 
-    res.status(201).json({ success: true, emailSent: false });
+    let emailSent = true;
+    try {
+      await mail.sendMail({
+        to: config.notifications.omeEmail,
+        subject: 'Member cannot meet on Sunday (FYI) — Android app',
+        body: `A member requested a non-Sunday meeting time via the Android app.\n\nCampus: ${campusName}\nMember: ${memberName} (${memberEmail})\nNotes: ${notes || '(none)'}`,
+      });
+    } catch (emailErr) {
+      console.error('Opt-out saved, but email failed:', emailErr);
+      emailSent = false;
+    }
+
+    res.status(201).json({ success: true, emailSent });
   } catch (err) {
     next(err);
   }

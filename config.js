@@ -42,4 +42,18 @@ module.exports = {
     elderGroupId: process.env.ENTRA_GROUP_ID_ELDERS,
     adminGroupId: process.env.ENTRA_GROUP_ID_ADMINS,
   },
+
+  // Graph mail — its own separate Entra app registration/credentials,
+  // independent of coastal-elder-scheduler's, per the self-contained
+  // repos rule.
+  graph: {
+    tenantId: process.env.GRAPH_TENANT_ID,
+    clientId: process.env.GRAPH_CLIENT_ID,
+    clientSecret: process.env.GRAPH_CLIENT_SECRET,
+    sendAsMailbox: process.env.GRAPH_SEND_AS_MAILBOX,
+  },
+
+  notifications: {
+    omeEmail: process.env.OME_EMAIL,
+  },
 };
